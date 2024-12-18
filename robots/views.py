@@ -1,7 +1,7 @@
 import json
-import requests
 import re
 import datetime
+import openpyxl
 
 from calendar import monthrange
 
@@ -214,9 +214,7 @@ def versions_in_db(request, pk):
     data = list()
     for version in model.versions.all():
         version = dict(version=version.version,
-                       hyperlink='http://127.0.0.1:8000/models/{}/versions/{}/'.format(
-                           model.pk, version.pk
-                       ))
+                       hyperlink=f'http://127.0.0.1:8000/models/{model.pk}/versions/{version.pk}/')
         data.append(version)
     data = dict(versions=data)
     return JsonResponse(data, safe=False)
@@ -282,6 +280,8 @@ def total_robots_serial_in_db(request):
         data.append(model)
     data = dict(total_models=model_list.count(),
                 total_versions=RobotVersionDB.objects.all().count(),
+                производство_роботов='http://127.0.0.1:8000/robots/',
+                отчет_за_неделю='http://127.0.0.1:8000/robots/week/',
                 models=data)
     return JsonResponse(data, safe=False)
 
@@ -371,7 +371,7 @@ def robots_production(request):
                     elif 0 > seconds > 60:
                         return HttpResponse('Укажите время в районе 60 секунд')
                     else:
-                        created = '{}-{}-{} {}:{}:{}'.format(year, month, day, hour, minute, seconds)
+                        created = f'{year}-{month}-{day} {hour}:{minute}:{seconds}'
                         Robot.objects.create(model=model,
                                              version=version,
                                              created=datetime.datetime.strptime(created, '%Y-%m-%d %H:%M:%S'))
@@ -392,3 +392,52 @@ def robots_production(request):
     data.sort(key=to_order_robot_production)
     data = dict(production=data)
     return JsonResponse(data, safe=False)
+
+
+def week_report(request):
+    """
+    Данная функция создает отчет о всех сделанных моделях работов и их версиях
+    за прошедшиую неделю в виде xlsx документа, который содержит страницы по каждой модели,
+    находящейся в базе данных предприятия.
+    К сожалению, я не нашел способа сделать данный документ стандартными средствами Django
+    и Python, поэтому пришлось использовать библиотеку openpyxl
+    :param request: в данной фунции не используется. Необходим лишь для вызова функции по
+    обращению к данному эндпойнту.
+    :return: response, содержащий в себе xlsx документ.
+    """
+    wb = openpyxl.Workbook()
+
+    week_ago = datetime.datetime.today() - datetime.timedelta(days=7)
+    models = RobotModelDB.objects.all()
+
+    for model in models:
+        ws = wb.create_sheet(f'{model.model}')
+        versions = model.versions.all()
+        data = list()
+
+        for version in versions:
+            robots = Robot.objects.filter(model=model.model,
+                                          version=version.version,
+                                          created__range=[week_ago, datetime.datetime.today()]).count()
+            robots = dict(A=model.model,
+                          B=version.version,
+                          C=robots)
+            data.append(robots)
+
+        ws['A1'] = 'Модель'
+        ws['B1'] = 'Версия'
+        ws['C1'] = 'Количество за неделю'
+
+        for row in data:
+            ws.append(row)
+
+    week_ago = week_ago.strftime('%Y-%m-%d')
+    today = datetime.datetime.today().strftime('%Y-%m-%d')
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename=week report ({week_ago})-({today}).xlsx'
+
+    wb.remove(wb['Sheet'])
+    wb.save(response)
+
+    return response
