@@ -6,3 +6,13 @@ from customers.models import Customer
 class Order(models.Model):
     customer = models.ForeignKey(Customer,on_delete=models.CASCADE)
     robot_serial = models.CharField(max_length=5,blank=False, null=False)
+
+
+class ActiveOrder(models.Model):
+    customer = models.ForeignKey(Customer,on_delete=models.CASCADE, related_name='actives')
+    robot_serial = models.CharField(max_length=5, blank=False, null=False)
+
+
+class ReleaseOrder(models.Model):
+    customer = models.ForeignKey(Customer,on_delete=models.CASCADE, related_name='releases')
+    robot_serial = models.CharField(max_length=5,blank=False, null=False)

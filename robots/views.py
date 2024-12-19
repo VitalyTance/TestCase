@@ -7,15 +7,19 @@ from calendar import monthrange
 
 from django.shortcuts import redirect, reverse, get_object_or_404
 from django.http.response import JsonResponse, HttpResponse
-from django.core.validators import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 from django.core.cache import cache
+from django.core.mail import send_mail
 
-from .models import RobotModelDB, RobotVersionDB, Robot
+from .models import RobotModelDB, RobotVersionDB, Robot, RobotOffer, RobotRelease
+from customers.models import Customer
+from orders.models import ActiveOrder, ReleaseOrder
 # Create your views here.
 
 
 regex = r'^[A-Z0-9]{2}$'
+
+email_message= 'Добрый день!\nНедавно вы интересовались нашим роботом модели {}, версии {}.\nЭтот робот теперь в наличии. Если вам подходит этот вариант - пожалуйста, свяжитесь с нами\n'
 
 
 @csrf_exempt
@@ -278,23 +282,19 @@ def total_robots_serial_in_db(request):
                      hyperlink='http://127.0.0.1:8000/models/{}/'.format(model.pk),
                      versions=versions)
         data.append(model)
+
     data = dict(total_models=model_list.count(),
                 total_versions=RobotVersionDB.objects.all().count(),
+                заказчики='http://127.0.0.1:8000/customers/',
+                все_ордеры='http://127.0.0.1:8000/orders/',
+                активные_ордеры='http://127.0.0.1:8000/orders/actives/',
+                реализованные_ордера='http://127.0.0.1:8000/orders/releases/',
                 производство_роботов='http://127.0.0.1:8000/robots/',
+                предложения_роботов='http://127.0.0.1:8000/robots/offers/',
+                проданные_роботы='http://127.0.0.1:8000/robots/releases/',
                 отчет_за_неделю='http://127.0.0.1:8000/robots/week/',
                 models=data)
     return JsonResponse(data, safe=False)
-
-
-def to_order_robot_production(e):
-    """
-    Даная функция сделана для опорядочивания JSON записей по
-    дате создания, так как в функции robots_production имеется возможность создания
-    внесения данных о произведенных роботах в прошлом.
-    :param e: элемент created из списка data
-    :return: опорядоченный список json записей по дате создания
-    """
-    return e['created']
 
 
 @csrf_exempt
@@ -302,7 +302,9 @@ def robots_production(request):
     """
     Данная функция добавляет данные о произведенных роботах, посредвом
     специального обращения к данному эндпойнту, путем добавления серийного номера
-    в адрессную строку браузера к url.
+    в адрессную строку браузера к url. Также, при создании робота, если он есть в активных
+    заказах, ордер заказчика переводится из активного в неактивный, а самому заказчику на email
+    отправляется сообщение об изготовлении робота.
     :param request: обеспечивает извлечение данных, переданных в параметре serail посредством
     request.GET.get, после чего проводится валидация данных на предмет соответствия серийным номерам,
     представленных в базе данных предприятия.
@@ -317,6 +319,9 @@ def robots_production(request):
     P.S. Данная функция может работать некорректно в браузере Chrome, поэтому, переда работой с
     данной функцией необходимо удалить историю браузера за последнее время.
     """
+
+    from .scripts import to_order_robot_production
+
     regex_serial = r'^[A-Z0-9]{2}[\-]{1}[A-Z0-9]{2}$'
     regex_datetime = r'^[0-9]{4}[\s]{1}[0-9]{2}[\s]{1}[0-9]{2}[\s]{1}[0-9]{2}[\s]{1}[0-9]{2}[\s]{1}[0-9]{2}$'
 
@@ -375,12 +380,59 @@ def robots_production(request):
                         Robot.objects.create(model=model,
                                              version=version,
                                              created=datetime.datetime.strptime(created, '%Y-%m-%d %H:%M:%S'))
-                        return redirect(reverse('robots:production'))
+                        robot = RobotOffer.objects.create(model=model,
+                                                          version=version,
+                                                          created=datetime.datetime.strptime(created, '%Y-%m-%d %H:%M:%S'))
+
+                        if not ActiveOrder.objects.filter(robot_serial=robot.serial):
+                            return redirect(reverse('robots:production'))
+                        else:
+                            order = ActiveOrder.objects.filter(robot_serial=robot.serial).first()
+                            customer = Customer.objects.get(pk=order.customer_id)
+                            RobotRelease.objects.create(model=robot.model,
+                                                        version=robot.version,
+                                                        created=robot.created)
+                            ReleaseOrder.objects.create(customer=customer,
+                                                        robot_serial=order.robot_serial)
+
+                            send_mail(
+                                subject='Ваш заказ готов',
+                                message=email_message.format(robot.model, robot.version),
+                                from_email='vitalytanceforwork@gmail.com',
+                                recipient_list=[customer.email]
+                            )
+                            robot.delete()
+                            order.delete()
+                            return redirect(reverse('robots:production'))
+
                 else:
                     Robot.objects.create(model=model,
                                          version=version,
                                          created=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                    return redirect(reverse('robots:production'))
+                    robot = RobotOffer.objects.create(model=model,
+                                                      version=version,
+                                                      created=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
+                    if not ActiveOrder.objects.filter(robot_serial=robot.serial):
+                        return redirect(reverse('robots:production'))
+                    else:
+                        order = ActiveOrder.objects.filter(robot_serial=robot.serial).first()
+                        customer = Customer.objects.get(pk=order.customer_id)
+                        RobotRelease.objects.create(model=robot.model,
+                                                    version=robot.version,
+                                                    created=robot.created)
+                        ReleaseOrder.objects.create(customer=customer,
+                                                    robot_serial=order.robot_serial)
+
+                        send_mail(
+                            subject='Ваш заказ готов',
+                            message=email_message.format(robot.model, robot.version),
+                            from_email='vitalytanceforwork@gmail.com',
+                            recipient_list=[customer.email]
+                        )
+                        robot.delete()
+                        order.delete()
+                        return redirect(reverse('robots:production'))
 
     data = list()
     robots = Robot.objects.all()
@@ -391,6 +443,75 @@ def robots_production(request):
         data.append(robot)
     data.sort(key=to_order_robot_production)
     data = dict(production=data)
+
+    actives = ActiveOrder.objects.all()
+
+    for active in actives:
+        if RobotOffer.objects.filter(serial=active.robot_serial):
+            robot = RobotOffer.objects.filter(serial=active.robot_serial).first()
+            RobotRelease.objects.create(model=robot.model,
+                                        version=robot.version,
+                                        created=robot.created)
+            customer = Customer.objects.get(pk=active.customer_id)
+            ReleaseOrder.objects.create(customer=active.customer,
+                                        robot_serial=active.robot_serial)
+            send_mail(
+                subject='Ваш заказ готов',
+                message=email_message.format(robot.model, robot.version),
+                from_email='vitalytanceforwork@gmail.com',
+                recipient_list=[customer.email]
+            )
+            robot.delete()
+            active.delete()
+
+    return JsonResponse(data, safe=False)
+
+
+@csrf_exempt
+def robots_offers(request):
+    """
+    Данное представление отображает все нереализованные произведенные роботы.
+    При создании робота, робот располагается в двух таблицах - "robots_robot" и "robots_robotoffer".
+    Сразу же после производства и добавления в в список предложений, происходит проверка относительно
+    ордеров от потребителей. И если находится соответсвие с заявкой, то робот добавляется в таблицу
+    "robots_robotrelease", а из robotoffer адаляется соответсвующая запись. Сам ордер перемешается из
+    таблицы активных заявок в реализованные, а пользователю отправляется сообщение о произведенном роботе.
+    :param request: Обращение к представлению
+    :return:JSONResponse c предложениями роботов.
+    """
+
+    offers = RobotOffer.objects.all().values('model', 'version', 'created', 'serial')
+    data = list()
+
+    for offer in offers:
+        data.append(offer)
+
+    data = dict(offers=data)
+
+    return JsonResponse(data, safe=False)
+
+
+@csrf_exempt
+def robots_releases(request):
+    """
+    Данное представление отображает все реализованные произведенные роботы.
+    При создании робота, робот располагается в двух таблицах - "robots_robot" и "robots_robotoffer".
+    Сразу же после производства и добавления в в список предложений, происходит проверка относительно
+    ордеров от потребителей. И если находится соответсвие с заявкой, то робот добавляется в таблицу
+    "robots_robotrelease", а из robotoffer адаляется соответсвующая запись. Сам ордер перемешается из
+    таблицы активных заявок в реализованные, а пользователю отправляется сообщение о произведенном роботе.
+    :param request: Обращение к представлению
+    :return:JSONResponse cо списком json-записей реализованных роботов.
+    """
+
+    releases = RobotRelease.objects.all().values('model', 'version', 'created', 'serial')
+    data = list()
+
+    for release in releases:
+        data.append(release)
+
+    data = dict(releases=data)
+
     return JsonResponse(data, safe=False)
 
 

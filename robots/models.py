@@ -43,3 +43,25 @@ class Robot(models.Model):
     def save(self, *args, **kwargs):
         self.serial = self.model + '-' + self.version
         return super(Robot, self).save(*args, **kwargs)
+
+
+class RobotOffer(models.Model):
+    model = models.CharField(max_length=2, blank=False, null=False)
+    version = models.CharField(max_length=2, blank=False, null=False)
+    serial = models.CharField(max_length=5, blank=False, null=False)
+    created = models.DateTimeField(blank=False, null=False)
+
+    def save(self, *args, **kwargs):
+        self.serial = self.model + '-' + self.version
+        return super(RobotOffer, self).save(*args, **kwargs)
+
+
+class RobotRelease(models.Model):
+    model = models.CharField(max_length=2, blank=False, null=False)
+    version = models.CharField(max_length=2, blank=False, null=False)
+    serial = models.CharField(max_length=5, blank=False, null=False)
+    created = models.DateTimeField(blank=False, null=False)
+
+    def save(self, *args, **kwargs):
+        self.serial = self.model + '-' + self.version
+        return super(RobotRelease, self).save(*args, **kwargs)

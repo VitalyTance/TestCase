@@ -16,5 +16,7 @@ urlpatterns = [
     path('models/<int:pk>/versions/', views.versions_in_db, name='versions'),
     path('models/<int:pk>/versions/<int:id>/', views.serial_number_in_db, name='serial'),
     path('robots/', views.robots_production, name='production'),
+    path('robots/offers/', views.robots_offers, name='offers'),
+    path('robots/releases/', views.robots_releases, name='releases'),
     path('robots/week/', views.week_report, name='week-report'),
 ]
